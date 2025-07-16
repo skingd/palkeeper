@@ -1,0 +1,25 @@
+{
+  "basicSettings": {
+    "checkInterval": 30,
+    "serverExecutable": "PalServer-Win64-Shipping-Cmd.exe",
+    "startupScript": "G:\\steamcmd\\palworld.bat",
+    "startupWaitTime": 60
+  },
+  "advancedSettings": {
+    "maxRestartAttempts": 3,
+    "restartCooldown": 300
+  },
+  "emailNotifications": {
+    "enabled": false,
+    "smtpServer": "",
+    "emailFrom": "",
+    "emailTo": "",
+    "useSSL": true,
+    "smtpPort": 587
+  },
+  "logging": {
+    "logFile": "PalKeeper.log",
+    "statusReportInterval": 10,
+    "enableConsoleColors": true
+  }
+}

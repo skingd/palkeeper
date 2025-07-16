@@ -1,0 +1,25 @@
+{
+  "basicSettings": {
+    "checkInterval": 60,
+    "serverExecutable": "PalServer-Win64-Shipping-Cmd.exe",
+    "startupScript": "C:\\PalworldServer\\start_server.bat",
+    "startupWaitTime": 120
+  },
+  "advancedSettings": {
+    "maxRestartAttempts": 5,
+    "restartCooldown": 600
+  },
+  "emailNotifications": {
+    "enabled": true,
+    "smtpServer": "smtp.gmail.com",
+    "emailFrom": "your-email@gmail.com",
+    "emailTo": "admin@yourcompany.com",
+    "useSSL": true,
+    "smtpPort": 587
+  },
+  "logging": {
+    "logFile": "C:\\Logs\\PalKeeper-Production.log",
+    "statusReportInterval": 15,
+    "enableConsoleColors": true
+  }
+}
