@@ -29,8 +29,17 @@ function Write-Log {
     Write-Host $logMessage
     
     # Also write to log file
-    $logFile = Join-Path $PSScriptRoot "PalKeeper.log"
-    $logMessage | Out-File -FilePath $logFile -Append -Encoding UTF8
+    try {
+        $logFile = Join-Path $PSScriptRoot "PalKeeper.log"
+        $logDir = Split-Path -Path $logFile -Parent
+        if ($logDir -and -not (Test-Path $logDir)) {
+            New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+        }
+        $logMessage | Out-File -FilePath $logFile -Append -Encoding UTF8
+    }
+    catch {
+        Write-Host "Warning: Failed to write to log file: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 
 # Function to check if the server process is running

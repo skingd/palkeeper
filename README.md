@@ -37,11 +37,14 @@ A PowerShell application that automatically monitors your Palworld server and re
 
 - Monitors the `PalServer-Win64-Shipping-Cmd.exe` process
 - Automatically restarts the server if it's not running
+- **Automatic save file backups** before updates and on startup
+- **Automatic server updates** on initial startup
 - **JSON-based configuration** for easy setup and maintenance
 - Configurable monitoring intervals and restart behavior
 - Detailed logging with timestamps and color coding
 - Email notifications for server events
 - Graceful startup waiting and intelligent restart logic
+- **Automatic backup rotation** with configurable retention
 - Multiple configuration profiles support
 
 ## Files
@@ -83,6 +86,19 @@ A PowerShell application that automatically monitors your Palworld server and re
     "maxRestartAttempts": 3,
     "restartCooldown": 300
   },
+  "updateSettings": {
+    "runUpdatesOnStart": true,
+    "updateScript": "G:\\steamcmd\\Palworld.bat",
+    "updateTimeout": 300
+  },
+  "backupSettings": {
+    "enableBackup": true,
+    "backupOnStart": true,
+    "saveFilePath": "G:\\steamcmd\\steamapps\\common\\PalServer\\Pal\\Saved",
+    "backupDestination": "G:\\Backups\\Palworld",
+    "maxBackups": 10,
+    "backupBeforeUpdate": true
+  },
   "emailNotifications": {
     "enabled": false,
     "smtpServer": "smtp.gmail.com",
@@ -110,6 +126,19 @@ A PowerShell application that automatically monitors your Palworld server and re
 ### Advanced Settings
 - `maxRestartAttempts` - Maximum consecutive restart attempts before cooldown
 - `restartCooldown` - Cooldown period between restart attempts (seconds)
+
+### Update Settings
+- `runUpdatesOnStart` - Run server updates on initial startup
+- `updateScript` - Path to the update script (usually the SteamCMD script)
+- `updateTimeout` - Maximum time to wait for updates to complete (seconds)
+
+### Backup Settings
+- `enableBackup` - Enable/disable automatic backups
+- `backupOnStart` - Create backup when PalKeeper starts
+- `saveFilePath` - Path to the Palworld save files directory
+- `backupDestination` - Where to store backups
+- `maxBackups` - Maximum number of backups to retain (older ones auto-deleted)
+- `backupBeforeUpdate` - Create backup before running updates
 
 ### Email Notifications
 - `enabled` - Enable/disable email notifications

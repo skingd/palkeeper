@@ -9,6 +9,19 @@
     "maxRestartAttempts": 5,
     "restartCooldown": 600
   },
+  "updateSettings": {
+    "runUpdatesOnStart": true,
+    "updateScript": "G:\\steamcmd\\Palworld.bat",
+    "updateTimeout": 300
+  },
+  "backupSettings": {
+    "enableBackup": true,
+    "backupOnStart": true,
+    "saveFilePath": "G:\\steamcmd\\steamapps\\common\\PalServer\\Pal\\Saved",
+    "backupDestination": "G:\\Backups\\Palworld",
+    "maxBackups": 10,
+    "backupBeforeUpdate": true
+  },
   "emailNotifications": {
     "enabled": true,
     "smtpServer": "smtp.gmail.com",
