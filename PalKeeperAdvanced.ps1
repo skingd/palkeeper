@@ -191,23 +191,40 @@ function Write-Log {
 function Invoke-SaveBackup {
     param([string]$Reason = "Scheduled")
     
-    if (-not $EnableBackup -or -not $SaveFilePath -or -not $BackupDestination) {
-        Write-Log "Backup skipped: not configured or disabled"
+    if (-not $EnableBackup) {
+        Write-Log "Backup skipped: disabled in configuration"
+        return $false
+    }
+    
+    if (-not $SaveFilePath) {
+        Write-Log "Backup skipped: saveFilePath not configured in config.json" "WARNING"
+        return $false
+    }
+    
+    if (-not $BackupDestination) {
+        Write-Log "Backup skipped: backupDestination not configured in config.json" "WARNING"
         return $false
     }
     
     if (-not (Test-Path $SaveFilePath)) {
-        Write-Log "Save file path not found: $SaveFilePath" "WARNING"
+        Write-Log "Save file path not found: $SaveFilePath" "ERROR"
+        Write-Log "Please verify the saveFilePath in config.json" "ERROR"
         return $false
     }
     
     try {
-        Write-Log "Starting backup of save files... (Reason: $Reason)" "SUCCESS"
+        Write-Log "========================================" "SUCCESS"
+        Write-Log "Starting backup of save files..." "SUCCESS"
+        Write-Log "Reason: $Reason"
+        Write-Log "Source: $SaveFilePath"
+        Write-Log "Destination: $BackupDestination"
+        Write-Log "========================================" "SUCCESS"
         
         # Create backup destination if it doesn't exist
         if (-not (Test-Path $BackupDestination)) {
+            Write-Log "Creating backup destination directory..."
             New-Item -Path $BackupDestination -ItemType Directory -Force | Out-Null
-            Write-Log "Created backup destination: $BackupDestination"
+            Write-Log "Created backup destination: $BackupDestination" "SUCCESS"
         }
         
         # Create timestamped backup folder
@@ -215,18 +232,32 @@ function Invoke-SaveBackup {
         $backupFolder = Join-Path $BackupDestination "Backup_$timestamp"
         
         Write-Log "Copying save files to: $backupFolder"
-        Copy-Item -Path $SaveFilePath -Destination $backupFolder -Recurse -Force
+        Copy-Item -Path $SaveFilePath -Destination $backupFolder -Recurse -Force -ErrorAction Stop
         
-        Write-Log "Backup completed successfully!" "SUCCESS"
+        # Verify backup was created
+        if (Test-Path $backupFolder) {
+            $backupSize = (Get-ChildItem -Path $backupFolder -Recurse | Measure-Object -Property Length -Sum).Sum
+            $backupSizeMB = [math]::Round($backupSize / 1MB, 2)
+            Write-Log "========================================" "SUCCESS"
+            Write-Log "Backup completed successfully!" "SUCCESS"
+            Write-Log "Backup location: $backupFolder"
+            Write-Log "Backup size: $backupSizeMB MB"
+            Write-Log "========================================" "SUCCESS"
+        } else {
+            Write-Log "Backup folder was not created!" "ERROR"
+            return $false
+        }
         
         # Clean up old backups
         Invoke-BackupCleanup
         
-        Send-EmailNotification "PalKeeper: Backup Completed" "Save files have been backed up successfully to $backupFolder`n`nReason: $Reason"
+        Send-EmailNotification "PalKeeper: Backup Completed" "Save files have been backed up successfully to $backupFolder`n`nReason: $Reason`nSize: $backupSizeMB MB"
         return $true
     }
     catch {
+        Write-Log "========================================" "ERROR"
         Write-Log "Backup failed: $($_.Exception.Message)" "ERROR"
+        Write-Log "========================================" "ERROR"
         Send-EmailNotification "PalKeeper: Backup Failed" "Failed to backup save files: $($_.Exception.Message)"
         return $false
     }
@@ -257,50 +288,181 @@ function Invoke-BackupCleanup {
 }
 
 function Invoke-ServerUpdate {
-    if (-not $RunUpdatesOnStart -or -not $UpdateScript) {
-        Write-Log "Updates skipped: not configured or disabled"
+    if (-not $RunUpdatesOnStart) {
+        Write-Log "Updates skipped: disabled in configuration"
         return $true
     }
     
-    if (-not (Test-Path $UpdateScript)) {
-        Write-Log "Update script not found: $UpdateScript" "WARNING"
+    if (-not $UpdateScript) {
+        Write-Log "Updates skipped: no update script configured" "WARNING"
+        return $true
+    }
+    
+    # Resolve relative paths to the script directory
+    $updateScriptPath = if ([System.IO.Path]::IsPathRooted($UpdateScript)) {
+        $UpdateScript
+    } else {
+        Join-Path $PSScriptRoot $UpdateScript
+    }
+    
+    if (-not (Test-Path $updateScriptPath)) {
+        Write-Log "Update script not found: $updateScriptPath" "ERROR"
+        Write-Log "Please verify the updateScript path in config.json" "ERROR"
         return $false
     }
     
     try {
-        Write-Log "Running server updates..." "SUCCESS"
-        Write-Log "Update script: $UpdateScript"
+        Write-Log "========================================" "SUCCESS"
+        Write-Log "Starting server update process..." "SUCCESS"
+        Write-Log "Update script: $updateScriptPath"
+        Write-Log "Timeout: $UpdateTimeout seconds"
+        Write-Log "========================================" "SUCCESS"
         
         # Backup before update if configured
         if ($BackupBeforeUpdate -and $EnableBackup) {
             Write-Log "Creating pre-update backup..."
-            Invoke-SaveBackup -Reason "Pre-Update"
+            $backupSuccess = Invoke-SaveBackup -Reason "Pre-Update"
+            if ($backupSuccess) {
+                Write-Log "Pre-update backup completed successfully" "SUCCESS"
+            } else {
+                Write-Log "Pre-update backup failed, but continuing with update..." "WARNING"
+            }
         }
         
         # Run the update script and wait for completion
-        Write-Log "Executing update script (timeout: $UpdateTimeout seconds)..."
-        $process = Start-Process -FilePath $UpdateScript -WindowStyle Normal -PassThru
+        Write-Log "Executing update script..." "SUCCESS"
+        Write-Log "Command: $updateScriptPath"
         
-        $completed = $process.WaitForExit($UpdateTimeout * 1000)
+        # Get the directory containing the script
+        $scriptDir = Split-Path -Path $updateScriptPath -Parent
+        $scriptName = Split-Path -Path $updateScriptPath -Leaf
         
-        if ($completed) {
-            if ($process.ExitCode -eq 0) {
-                Write-Log "Server updates completed successfully!" "SUCCESS"
-                Send-EmailNotification "PalKeeper: Updates Completed" "Server updates have been applied successfully."
-                return $true
-            } else {
-                Write-Log "Update script exited with code: $($process.ExitCode)" "WARNING"
+        $processStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+        
+        # Use cmd.exe with pushd to handle UNC paths properly
+        if ($scriptDir) {
+            $processStartInfo.FileName = "cmd.exe"
+            $processStartInfo.Arguments = "/c pushd `"$scriptDir`" && `"$scriptName`" && popd"
+            Write-Log "Executing via cmd.exe to handle path: $scriptDir"
+        } else {
+            $processStartInfo.FileName = $updateScriptPath
+        }
+        
+        $processStartInfo.UseShellExecute = $false
+        $processStartInfo.RedirectStandardOutput = $true
+        $processStartInfo.RedirectStandardError = $true
+        $processStartInfo.CreateNoWindow = $false
+        
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $processStartInfo
+        
+        # Track if process has exited
+        $processExited = $false
+        $exitEventHandler = {
+            $script:processExited = $true
+            Write-Log "UPDATE: Process exited with code $($EventArgs.ExitCode)" $(if ($EventArgs.ExitCode -eq 0) { "SUCCESS" } else { "WARNING" })
+        }
+        
+        $outputHandler = {
+            if (-not [string]::IsNullOrEmpty($EventArgs.Data)) {
+                Write-Log "UPDATE: $($EventArgs.Data)"
+            }
+        }
+        
+        $errorHandler = {
+            if (-not [string]::IsNullOrEmpty($EventArgs.Data)) {
+                Write-Log "UPDATE ERROR: $($EventArgs.Data)" "WARNING"
+            }
+        }
+        
+        # Register event handlers
+        $exitEvent = Register-ObjectEvent -InputObject $process -EventName Exited -Action $exitEventHandler
+        $outputEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $outputHandler
+        $errorEvent = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action $errorHandler
+        
+        # Enable raising events for the Exited event
+        $process.EnableRaisingEvents = $true
+        
+        $started = $process.Start()
+        if (-not $started) {
+            Write-Log "Failed to start update process" "ERROR"
+            Unregister-Event -SourceIdentifier $exitEvent.Name -ErrorAction SilentlyContinue
+            Unregister-Event -SourceIdentifier $outputEvent.Name -ErrorAction SilentlyContinue
+            Unregister-Event -SourceIdentifier $errorEvent.Name -ErrorAction SilentlyContinue
+            return $false
+        }
+        
+        $process.BeginOutputReadLine()
+        $process.BeginErrorReadLine()
+        
+        Write-Log "Update process started (PID: $($process.Id))"
+        Write-Log "Waiting for update to complete (timeout: $UpdateTimeout seconds)..."
+        
+        # Wait for process to exit using event-based approach
+        $startTime = Get-Date
+        $checkInterval = 2
+        
+        while (-not $process.HasExited) {
+            Start-Sleep -Seconds $checkInterval
+            $elapsed = ((Get-Date) - $startTime).TotalSeconds
+            
+            # Show progress every 30 seconds
+            if ([math]::Floor($elapsed) % 30 -eq 0 -and [math]::Floor($elapsed) -gt 0) {
+                Write-Log "Still updating... ($([math]::Floor($elapsed)) seconds elapsed)"
+            }
+            
+            # Check timeout
+            if ($elapsed -ge $UpdateTimeout) {
+                Write-Log "========================================" "ERROR"
+                Write-Log "Update process TIMEOUT after $UpdateTimeout seconds!" "ERROR"
+                Write-Log "Attempting to terminate update process..." "WARNING"
+                Write-Log "========================================" "ERROR"
+                
+                try {
+                    $process.Kill()
+                    $process.WaitForExit(5000)
+                    Write-Log "Update process terminated"
+                } catch {
+                    Write-Log "Failed to terminate update process: $($_.Exception.Message)" "ERROR"
+                }
+                
+                # Cleanup event handlers
+                Unregister-Event -SourceIdentifier $exitEvent.Name -ErrorAction SilentlyContinue
+                Unregister-Event -SourceIdentifier $outputEvent.Name -ErrorAction SilentlyContinue
+                Unregister-Event -SourceIdentifier $errorEvent.Name -ErrorAction SilentlyContinue
+                
                 return $true  # Continue anyway
             }
+        }
+        
+        # Process has exited, get the exit code
+        $exitCode = $process.ExitCode
+        $totalTime = ((Get-Date) - $startTime).TotalSeconds
+        
+        # Cleanup event handlers
+        Unregister-Event -SourceIdentifier $exitEvent.Name -ErrorAction SilentlyContinue
+        Unregister-Event -SourceIdentifier $outputEvent.Name -ErrorAction SilentlyContinue
+        Unregister-Event -SourceIdentifier $errorEvent.Name -ErrorAction SilentlyContinue
+        
+        Write-Log "========================================" "SUCCESS"
+        Write-Log "Update process completed in $([math]::Round($totalTime, 1)) seconds" "SUCCESS"
+        Write-Log "Exit code: $exitCode" $(if ($exitCode -eq 0) { "SUCCESS" } else { "WARNING" })
+        Write-Log "========================================" "SUCCESS"
+        
+        if ($exitCode -eq 0) {
+            Send-EmailNotification "PalKeeper: Updates Completed" "Server updates have been applied successfully.`n`nExit Code: $exitCode`nDuration: $([math]::Round($totalTime, 1)) seconds"
+            return $true
         } else {
-            Write-Log "Update script timeout after $UpdateTimeout seconds" "WARNING"
-            $process.Kill()
+            Write-Log "Update script returned non-zero exit code, but continuing..." "WARNING"
             return $true  # Continue anyway
         }
     }
     catch {
-        Write-Log "Update failed: $($_.Exception.Message)" "ERROR"
-        Send-EmailNotification "PalKeeper: Update Failed" "Server update failed: $($_.Exception.Message)"
+        Write-Log "========================================" "ERROR"
+        Write-Log "Update failed with exception: $($_.Exception.Message)" "ERROR"
+        Write-Log "Stack trace: $($_.Exception.StackTrace)" "ERROR"
+        Write-Log "========================================" "ERROR"
+        Send-EmailNotification "PalKeeper: Update Failed" "Server update failed with error: $($_.Exception.Message)"
         return $false
     }
 }
@@ -396,19 +558,52 @@ function Start-Server {
     try {
         if (-not (Test-Path $StartupScript)) {
             Write-Log "Startup script not found: $StartupScript" "ERROR"
+            Write-Log "Please verify the startupScript path in config.json" "ERROR"
             $script:ConsecutiveFailures++
             return $false
         }
         
-        Start-Process -FilePath $StartupScript -WindowStyle Normal
+        Write-Log "========================================" "SUCCESS"
+        Write-Log "Starting Palworld server..." "SUCCESS"
+        Write-Log "Startup script: $StartupScript"
+        Write-Log "========================================" "SUCCESS"
+        
+        # Get the directory containing the startup script
+        $scriptDir = Split-Path -Path $StartupScript -Parent
+        $scriptName = Split-Path -Path $StartupScript -Leaf
+        
+        # Use cmd.exe with pushd to handle paths properly (including UNC)
+        if ($scriptDir) {
+            Write-Log "Executing via cmd.exe from directory: $scriptDir"
+            $processInfo = Start-Process -FilePath "cmd.exe" `
+                                        -ArgumentList "/c pushd `"$scriptDir`" && `"$scriptName`" && popd" `
+                                        -WindowStyle Normal `
+                                        -PassThru
+            
+            if ($processInfo) {
+                Write-Log "Startup script process launched (PID: $($processInfo.Id))" "SUCCESS"
+            }
+        } else {
+            Write-Log "Executing startup script directly"
+            $processInfo = Start-Process -FilePath $StartupScript `
+                                        -WindowStyle Normal `
+                                        -PassThru
+            
+            if ($processInfo) {
+                Write-Log "Startup script process launched (PID: $($processInfo.Id))" "SUCCESS"
+            }
+        }
+        
         $script:LastRestartTime = Get-Date
         $script:TotalRestarts++
         
         Write-Log "Server startup command executed (Total restarts: $($script:TotalRestarts))" "SUCCESS"
+        Write-Log "Note: The startup script should launch the server and exit"
         return $true
     }
     catch {
         Write-Log "Failed to start server: $($_.Exception.Message)" "ERROR"
+        Write-Log "Error details: $($_.Exception)" "ERROR"
         $script:ConsecutiveFailures++
         return $false
     }
@@ -479,25 +674,37 @@ function Start-Monitoring {
     # Send startup notification
     Send-EmailNotification "PalKeeper: Monitoring Started" "PalKeeper has started monitoring the Palworld server at $(Get-Date).`n`nConfiguration:`n- Check Interval: $CheckInterval seconds`n- Server Executable: $ServerExecutable`n- Startup Script: $StartupScript`n- Backup Enabled: $EnableBackup`n- Updates on Start: $RunUpdatesOnStart"
     
-    # Run initial backup if configured
-    if ($BackupOnStart) {
-        Write-Log "Performing initial backup..."
-        Invoke-SaveBackup -Reason "Initial Startup"
-    }
+    # Check if server is already running before doing initial setup
+    $serverWasRunning = Test-ServerRunning -ProcessName $ServerExecutable
     
-    # Run updates if configured
-    if ($RunUpdatesOnStart) {
-        Write-Log "Running server updates..."
-        Invoke-ServerUpdate
-    }
-    
-    # Initial check and status
-    if (Test-ServerRunning -ProcessName $ServerExecutable) {
+    if ($serverWasRunning) {
+        Write-Log "Server is already running - skipping initial backup and updates" "WARNING"
+        Write-Log "Stop the server first if you want to run updates on startup"
         Show-Status
     } else {
-        Write-Log "Server is not running, starting it now..."
+        Write-Log "Server is not running - proceeding with initial setup..."
+        
+        # Run initial backup if configured
+        if ($BackupOnStart -and $EnableBackup) {
+            Write-Log "Performing initial backup..."
+            Invoke-SaveBackup -Reason "Initial Startup"
+        }
+        
+        # Run updates if configured
+        if ($RunUpdatesOnStart) {
+            Write-Log "Running server updates..."
+            $updateSuccess = Invoke-ServerUpdate
+            if (-not $updateSuccess) {
+                Write-Log "Updates failed, but continuing with server startup..." "WARNING"
+            }
+        }
+        
+        # Start the server
+        Write-Log "Starting server for the first time..."
         if (Start-Server -StartupScript $StartupScript) {
             Wait-ForServerStart -ProcessName $ServerExecutable -MaxWaitTime $StartupWaitTime
+        } else {
+            Write-Log "Failed to start server on initial startup" "ERROR"
         }
     }
     

@@ -2,8 +2,8 @@
   "basicSettings": {
     "checkInterval": 30,
     "serverExecutable": "PalServer-Win64-Shipping-Cmd.exe",
-    "startupScript": "G:\\steamcmd\\palworld.bat",
-    "startupWaitTime": 60
+    "startupScript": "G:\\palworld\\runpalworld.bat",
+    "startupWaitTime": 120
   },
   "advancedSettings": {
     "maxRestartAttempts": 3,
@@ -11,13 +11,13 @@
   },
   "updateSettings": {
     "runUpdatesOnStart": true,
-    "updateScript": "G:\\steamcmd\\Palworld.bat",
-    "updateTimeout": 300
+    "updateScript": "Palworld.bat",
+    "updateTimeout": 1800
   },
   "backupSettings": {
     "enableBackup": true,
     "backupOnStart": true,
-    "saveFilePath": "G:\\steamcmd\\steamapps\\common\\PalServer\\Pal\\Saved",
+    "saveFilePath": "G:\\palworld\\Pal\\Saved\\SaveGames\\0\\4256E675445C0C2720B5FEAE386BFF63",
     "backupDestination": "G:\\Backups\\Palworld",
     "maxBackups": 10,
     "backupBeforeUpdate": true
